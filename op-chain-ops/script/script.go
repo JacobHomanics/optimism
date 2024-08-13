@@ -44,12 +44,17 @@ type Host struct {
 	console    *Precompile[*ConsolePrecompile]
 
 	callStack []CallFrame
+
+	envVars map[string]string
+	labels  map[common.Address]string
 }
 
 func NewHost(logger log.Logger, fs *foundry.ArtifactsFS, executionContext Context) *Host {
 	h := &Host{
-		log: logger,
-		af:  fs,
+		log:     logger,
+		af:      fs,
+		envVars: make(map[string]string),
+		labels:  make(map[common.Address]string),
 	}
 
 	h.chainCfg = &params.ChainConfig{
@@ -151,13 +156,7 @@ func (h *Host) EnableCheats() error {
 
 	consolePrecompile, err := NewPrecompile[*ConsolePrecompile](&ConsolePrecompile{
 		logger: h.log,
-		sender: func() common.Address {
-			ctx := h.CurrentCall().Ctx
-			if ctx == nil {
-				return common.Address{}
-			}
-			return ctx.Caller()
-		},
+		sender: h.MsgSender,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to init console precompile: %w", err)
@@ -243,6 +242,7 @@ func (h *Host) onOpcode(pc uint64, op byte, gas, cost uint64, scope tracing.OpCo
 			Opener: vm.OpCode(op),
 			Ctx:    scopeCtx,
 		})
+		// TODO apply prank, if parent call-frame set up a prank
 	}
 	// Sanity check that top of the call-stack matches the scope context now
 	if len(h.callStack) == 0 || h.callStack[len(h.callStack)-1].Ctx != scopeCtx {
@@ -265,4 +265,12 @@ func (h *Host) CurrentCall() CallFrame {
 		return CallFrame{}
 	}
 	return h.callStack[len(h.callStack)-1]
+}
+
+func (h *Host) MsgSender() common.Address {
+	cf := h.CurrentCall()
+	if cf.Ctx == nil {
+		return common.Address{}
+	}
+	return cf.Ctx.Caller()
 }
